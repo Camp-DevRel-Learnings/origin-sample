@@ -1,0 +1,463 @@
+import React, { useState } from "react";
+import { toast } from "sonner";
+import { Header, Description } from "../src/components/shared";
+import { useAuth } from "@campnetwork/origin/react";
+import type { Address } from "viem/accounts";
+import { Button } from "./Button";
+import Section from "./Section";
+import { zeroAddress } from "viem";
+import { checkProfanity, sanitize } from "../utils/utils";
+import { createLicenseTerms } from "@campnetwork/origin";
+interface IPDetailsSectionProps {
+  uploadedFile: File | null;
+  setSectionIndex: (index: number) => void;
+  setMintResult?: (result: { transactionHash?: string; tokenId?: string }) => void;
+}
+
+
+const IPDetailsSection: React.FC<IPDetailsSectionProps> = ({
+  uploadedFile,
+  setSectionIndex,
+  setMintResult,
+}) => {
+  const auth = useAuth();
+  const { origin } = auth;  
+  const [ipName, setIpName] = useState("");
+  const [ipDescription, setIpDescription] = useState("");
+
+  const handleContinue = async () => {
+    if (!ipName.trim()) {
+      toast.error("Please enter an IP name", {
+        description: "IP name is required to continue.",
+      });
+      return;
+    }
+
+    if (!ipDescription.trim()) {
+      toast.error("Please enter an IP description", {
+        description: "IP description is required to continue.",
+      });
+      return;
+    }
+
+    // Check for profanity in IP name
+    if (checkProfanity(ipName)) {
+      toast.error("Please enter a valid name for your IP.", {
+        description: "The name contains profanity or invalid characters.",
+        duration: 5000,
+      });
+      return;
+    }
+
+    // Check for profanity in IP description
+    if (checkProfanity(ipDescription)) {
+      toast.error("Please enter a valid description for your IP.", {
+        description: "The description contains profanity or invalid characters.",
+        duration: 5000,
+      });
+      return;
+    }
+
+    // Check if Origin is properly initialized
+    if (!origin) {
+      toast.error("Origin is not initialized. Please try reconnecting your wallet.", {
+        description: "Make sure you're properly authenticated with Origin.",
+        duration: 5000,
+      });
+      return;
+    }
+
+    if (!auth.walletAddress) {
+      toast.error("No wallet connected. Please connect your wallet first.", {
+        description: "You need to connect a wallet to mint.",
+        duration: 5000,
+      });
+      return;
+    }
+
+    if (!uploadedFile) {
+      toast.error("No file uploaded. Please upload a file first.", {
+        description: "You need to upload a file to continue.",
+        duration: 5000,
+      });
+      return;
+    }
+
+
+    // Create a proper file object like the working sample
+    const ipfsFile = new File([uploadedFile], uploadedFile.name, { 
+      type: uploadedFile.type 
+    });
+    // Upload file to IPFS
+    let url = "";
+    let cid = "";
+    try {
+      const formData = new FormData();
+      formData.append('file', ipfsFile);
+      
+      const pinataJWT = process.env.NEXT_PUBLIC_PINATA_JWT;
+      if (!pinataJWT) {
+        throw new Error("Pinata JWT is not configured. Please set NEXT_PUBLIC_PINATA_JWT environment variable.");
+      }
+
+      const response = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${pinataJWT}`
+        },
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Pinata API error: ${response.status} - ${errorText}`);
+      }
+
+      const result = await response.json();
+      
+      if (!result.IpfsHash) {
+        throw new Error("Pinata did not return an IPFS hash");
+      }
+      cid = result.IpfsHash;
+      url = `https://gateway.pinata.cloud/ipfs/${result.IpfsHash}`;
+
+      if (!url) {
+        throw new Error("Failed to get IPFS URL after upload");
+      }
+
+      toast.success("File uploaded to IPFS successfully!", {
+        description: `IPFS URL: ${url}`,
+      });
+
+    } catch (error) {
+      console.error("IPFS upload error:", error);
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      toast.error("Failed to upload file to IPFS", {
+        description: errorMessage.includes("JWT") 
+          ? "Pinata JWT is not configured. Please set NEXT_PUBLIC_PINATA_JWT environment variable."
+          : `There was an error uploading your file: ${errorMessage}`,
+        duration: 5000,
+      });
+      return;
+    }
+
+    // Use the original file instead of re-downloading from IPFS
+    const file = uploadedFile;
+
+    const fileSizeMB = file.size / (1024 * 1024);
+    if (fileSizeMB > 10) { // 10MB limit
+      toast.error("File too large for minting.", {
+        description: `File size is ${fileSizeMB.toFixed(2)}MB. Maximum allowed is 10MB.`,
+        duration: 5000,
+      });
+      return;
+    }
+
+    // const license = {
+    //     price: BigInt(1000000000000000000),
+    //     duration: 2629800, // 30 days in seconds
+    //     royaltyBps: 1000,
+    //     paymentToken: "0x0000000000000000000000000000000000000000" as Address,
+    //   } as LicenseTerms;
+    // const priceInWei = parseEther("200", "wei");
+
+    //   const license = {
+    //     price: priceInWei,
+    //     duration: 2629800,
+    //     royaltyBps: 10,
+    //     paymentToken:
+    //       "0x0000000000000000000000000000000000000000" as `0x${string}`,
+    //   };
+
+      const price = BigInt(0.001 * 1e18); // price here (0.001 CAMP) can be configured to any value
+      const durationInSeconds = 7 * 24 * 60 * 60; // 7 days in seconds
+      const royaltyRate = Math.floor(0.25 * 100); // 25% royalty rate
+
+      const license = createLicenseTerms(
+        price,
+        durationInSeconds,
+        royaltyRate,
+        zeroAddress // payment token is set to zero address for native currency
+      );
+
+    // Create metadata similar to working sample
+
+    // const metadata = {
+    //     name: sanitized || "Untitled IP",
+    //     description: ipDescription.trim() || `A unique IP created on Camp Network`,
+    //     mimetype: file.type,
+    //     image: `ipfs://${cid}`
+    //   };
+
+      const metadata = {
+        name: ipName,
+        description: ipDescription,
+        mimetype: file.type,
+        image: url
+      };
+
+    setSectionIndex(3); 
+    
+    try {
+      console.log("Starting mint process...", {
+        fileSize: fileSizeMB.toFixed(2) + "MB",
+        walletAddress: auth.walletAddress,
+        hasOrigin: !!origin,
+        fileName: file.name,
+        fileType: file.type
+      });
+
+      console.log("Metadata:", metadata);
+      console.log("License:", license);
+
+  
+
+
+      const mintResult = await origin?.mintFile(file, metadata, license);
+
+      
+      console.log("Minting successful! Full result:", JSON.stringify(mintResult, null, 2));
+      console.log("Minting result type:", typeof mintResult);
+      console.log("Minting result keys:", mintResult ? Object.keys(mintResult) : 'null');
+
+      // Extract transaction hash from the result
+      // The mintFile might return different formats, so we check for common properties
+      let transactionHash: string | undefined;
+      let tokenId: string | undefined;
+
+      // Helper function to safely get nested values
+      const getNestedValue = (obj: unknown, paths: string[]): string | undefined => {
+        for (const path of paths) {
+          const keys = path.split('.');
+          let value: unknown = obj;
+          for (const key of keys) {
+            if (value && typeof value === 'object' && value !== null && key in value) {
+              value = (value as Record<string, unknown>)[key];
+            } else {
+              value = undefined;
+              break;
+            }
+          }
+          if (value && typeof value === 'string' && value.length > 0) {
+            return value;
+          }
+        }
+        return undefined;
+      };
+
+      // Check if it's a transaction receipt or transaction object (common in viem/wagmi)
+      if (mintResult && typeof mintResult === 'object') {
+        // Try multiple possible paths for transaction hash
+        const hashPaths = [
+          'transactionHash',
+          'hash',
+          'txHash',
+          'tx.hash',
+          'transaction.hash',
+          'receipt.transactionHash',
+          'receipt.hash',
+          'wait.transactionHash', // If it's a promise that resolves
+          'result.transactionHash',
+          'data.transactionHash',
+          'response.transactionHash',
+        ];
+        
+        transactionHash = getNestedValue(mintResult, hashPaths);
+        
+        // If still not found, try to stringify and look for hash-like patterns
+        if (!transactionHash) {
+          const str = JSON.stringify(mintResult);
+          // Look for a hex string that looks like a transaction hash (0x followed by 64 hex chars)
+          const hashMatch = str.match(/0x[a-fA-F0-9]{64}/);
+          if (hashMatch) {
+            transactionHash = hashMatch[0];
+          }
+        }
+        
+        // Check for token ID in various locations
+        const tokenIdPaths = [
+          'tokenId',
+          'tokenID',
+          'id',
+          'nftId',
+          'token.id',
+          'nft.id',
+          'result.tokenId',
+          'data.tokenId',
+        ];
+        
+        tokenId = getNestedValue(mintResult, tokenIdPaths);
+        
+        // If tokenId is a number, convert to string
+        if (tokenId && !isNaN(Number(tokenId))) {
+          tokenId = tokenId.toString();
+        }
+      } else if (typeof mintResult === 'string') {
+        // If it's just a string, check if it looks like a transaction hash
+        if (mintResult.startsWith('0x') && mintResult.length === 66) {
+          transactionHash = mintResult;
+        }
+      }
+
+      console.log("Extracted transaction hash:", transactionHash);
+      console.log("Extracted token ID:", tokenId);
+      
+      // If we still don't have a transaction hash, log a warning
+      if (!transactionHash) {
+        console.warn("Could not extract transaction hash from mint result. Full result:", mintResult);
+      }
+
+      // Store mint result for the success section
+      if (setMintResult) {
+        setMintResult({
+          transactionHash,
+          tokenId: tokenId?.toString(),
+        });
+      }
+
+      setSectionIndex(4); // success section after minting
+      toast.success(`Minting successful! Your IP NFT is now live.`, {
+        description: transactionHash ? `Transaction: ${transactionHash.slice(0, 10)}...` : undefined,
+        duration: 5000,
+      });
+      
+    } catch (error) {
+      console.error("Minting failed:", error);
+      console.error("Error details:", {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        name: error instanceof Error ? error.name : undefined,
+      });
+      
+      // Provide more specific error messages
+      let errorMessage = "Minting failed. Please try again later.";
+      let errorDescription = error instanceof Error ? error.message : "An error occurred";
+      
+      // Handle "Failed to fetch" errors
+      if (errorDescription.includes("Failed to fetch") || errorDescription.includes("fetch")) {
+        errorMessage = "Network request failed.";
+        errorDescription = "There was an issue connecting to the network. Please check your internet connection and try again.";
+      } else if (errorDescription.includes("signature") || errorDescription.includes("Failed to get signature")) {
+        errorMessage = "Transaction signature failed.";
+        errorDescription = "Please check your wallet connection and approve the transaction when prompted.";
+      } else if (errorDescription.includes("network") || errorDescription.includes("Network")) {
+        errorMessage = "Network error. Please check your connection.";
+        errorDescription = "Make sure you're connected to the correct network.";
+      } else if (errorDescription.includes("gas") || errorDescription.includes("Gas")) {
+        errorMessage = "Insufficient gas fees.";
+        errorDescription = "Please ensure you have enough gas for the transaction.";
+      } else if (errorDescription.includes("user rejected") || errorDescription.includes("User rejected")) {
+        errorMessage = "Transaction was rejected.";
+        errorDescription = "You declined the transaction. Please try again and approve when prompted.";
+      } else if (errorDescription.includes("IndexedDB")) {
+        errorMessage = "Storage error.";
+        errorDescription = "There was an issue with browser storage. Please try refreshing the page.";
+      }
+      
+      toast.error(errorMessage, {
+        description: errorDescription,
+        duration: 5000,
+      });
+
+      setSectionIndex(2); // stay on the same section to retry
+    }
+  };
+
+  const handleBack = () => {
+    setSectionIndex(1); // Go back to file upload section
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return "0 Bytes";
+    const k = 1024;
+    const sizes = ["Bytes", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  };
+
+  return (
+    <Section className="max-w-lg">
+      <Header text="IP Details" label="Step 3" />
+      <Description text="Provide details about your intellectual property." />
+      
+      {/* File Summary */}
+      {uploadedFile && (
+        <div className="w-full mb-4">
+          <div className="text-sm font-semibold text-gray-900 mb-2">
+            Uploaded File
+          </div>
+          <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">
+                {uploadedFile.type.startsWith('image/') ? '🖼️' : 
+                 uploadedFile.type.startsWith('audio/') ? '🎵' :
+                 uploadedFile.type.startsWith('video/') ? '🎬' : '📄'}
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900 truncate">
+                  {uploadedFile.name}
+                </p>
+                <p className="text-xs text-gray-500">
+                  {formatFileSize(uploadedFile.size)} • {uploadedFile.type}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* IP Name Input */}
+      <div className="w-full mb-4">
+        <label className="block text-sm font-medium text-gray-900 mb-2">
+          IP Name *
+        </label>
+        <input
+          type="text"
+          value={ipName}
+          onChange={(e) => setIpName(e.target.value)}
+          placeholder="Enter your IP name"
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+          maxLength={100}
+        />
+      </div>
+
+      {/* IP Description Input */}
+      <div className="w-full mb-6">
+        <label className="block text-sm font-medium text-gray-900 mb-2">
+          IP Description *
+        </label>
+        <textarea
+          value={ipDescription}
+          onChange={(e) => setIpDescription(e.target.value)}
+          placeholder="Describe your intellectual property"
+          rows={4}
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent resize-none"
+          maxLength={500}
+        />
+        <div className="text-xs text-gray-500 mt-1 text-right">
+          {ipDescription.length}/500 characters
+        </div>
+      </div>
+      
+      <div className="flex gap-2 w-full justify-between">
+        <Button
+          onClick={handleBack}
+          text="Back"
+          className="w-1/3"
+          justifyContent="center"
+          arrow="left"
+        />
+        <Button
+          onClick={handleContinue}
+          text="Continue"
+          className="w-1/3"
+          justifyContent="center"
+          arrow="right"
+          disabled={!ipName.trim() || !ipDescription.trim()}
+        />
+      </div>
+    </Section>
+  );
+};
+
+export default IPDetailsSection;

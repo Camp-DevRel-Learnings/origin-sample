@@ -1,0 +1,59 @@
+"use client";
+
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Environment, ParaProvider } from "@getpara/react-sdk";
+import { ApolloClient, InMemoryCache, HttpLink } from "@apollo/client";
+import { ApolloProvider } from "@apollo/client/react";
+import {
+  metaMaskWallet,
+  walletConnectWallet,
+  ParaEvmProvider,
+  coinbaseWallet,
+  okxWallet,
+} from "@getpara/evm-wallet-connectors";
+import { CampProvider } from "@campnetwork/origin/react";
+import { testnet } from "../../utils/chain";
+import "@getpara/react-sdk/styles.css";
+
+const client = new ApolloClient({
+  link: new HttpLink({
+    uri: process.env.NEXT_PUBLIC_SUBGRAPH_URL || "https://api.goldsky.com/api/public/project_clu8sr03ji34301z2b4xte1g5/subgraphs/camp-origin-testnet-upgadable/1.0.0/gn",
+  }),
+  cache: new InMemoryCache(),
+});
+
+const queryClient = new QueryClient();
+
+export default function Providers({ children }: { children: React.ReactNode }) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <CampProvider 
+        clientId="62713a3f-71fb-4373-8a22-052396ef4e23"
+        apiKey="5479be2e-1fa2-4d31-acf3-4012ddb0e68d"
+      >
+        <ParaProvider
+          paraClientConfig={{
+            env: Environment.PRODUCTION,
+            apiKey: process.env.NEXT_PUBLIC_PARA_API_KEY || "",
+            opts: {
+              externalWalletConnectionOnly: true,
+            },
+          }}
+        >
+          <ParaEvmProvider
+            config={{
+              projectId: "2902571ec972fe433a9f311b7be52790",
+              appName: "Camp",
+              chains: [testnet],
+              wallets: [metaMaskWallet, walletConnectWallet, coinbaseWallet, okxWallet],
+            }}
+          >
+            <ApolloProvider client={client}>
+              {children}
+            </ApolloProvider>
+          </ParaEvmProvider>
+        </ParaProvider>
+      </CampProvider>
+    </QueryClientProvider>
+  );
+} 

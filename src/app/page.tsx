@@ -1,65 +1,171 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import React, { useEffect, startTransition } from "react";
+import { AnimatePresence } from "framer-motion";
+import Navbar from "../../components/Navbar";
+import { Toaster } from "sonner";
+import { useAccount as useWagmiAccount } from "wagmi";
+import {
+  CampModal,
+  useAuthState,
+  useModal as useCampModal,
+  useConnect,
+  useAuth,
+} from "@campnetwork/origin/react";
+import {
+  useModal,
+  useWallet,
+  OAuthMethod,
+  ParaModal,
+} from "@getpara/react-sdk";
+import { generateProvider } from "../../utils/utils";
+import GalleryView from "../../components/GalleryView";
+import WelcomeSection from "../../components/WelcomeSection";
+import FileUploadSection from "../../components/FileUploadSection";
+import IPDetailsSection from "../../components/IPDetailsSection";
+import LoadingSection from "../../components/LoadingSection";
+import SuccessSection from "../../components/SuccessSection";
+
+
+export default function HomePage() {
+  const [sectionIndex, setSectionIndex] = React.useState(0);
+  const [galleryView, setGalleryView] = React.useState(false);
+  const [selectedCharacter, setSelectedCharacter] = React.useState<
+    string | null
+  >(null);
+  const [uploadedFile, setUploadedFile] = React.useState<File | null>(null);
+  const [mintResult, setMintResult] = React.useState<{
+    transactionHash?: string;
+    tokenId?: string;
+  } | null>(null);
+
+  const [name, setName] = React.useState<string>("");
+  const [provider, setProvider] = React.useState<any>(null);
+  const { authenticated } = useAuthState();
+  const auth = useAuth();
+  const { disconnect } = useConnect();
+  const { openModal: openCampModal } = useCampModal();
+  const { data: wallet } = useWallet();
+  const { openModal } = useModal();
+
+  const acc = useWagmiAccount();
+
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout | number | undefined;
+    
+    // Only set provider if wallet address matches authenticated Origin address
+    if (wallet?.address && authenticated && auth.walletAddress) {
+      const walletAddress = wallet.address.toLowerCase();
+      const originAddress = auth.walletAddress.toLowerCase();
+      
+      // Only set provider if addresses match
+      if (walletAddress === originAddress) {
+        timeoutId = setTimeout(async () => {
+          const newProvider = await generateProvider(acc);
+          startTransition(() => {
+            setProvider(newProvider);
+          });
+        }, 200);
+      } else {
+        // Addresses don't match, clear provider
+        startTransition(() => {
+          setProvider(null);
+        });
+      }
+    } else if (!wallet?.address || !authenticated) {
+      // Clear provider if wallet disconnected or not authenticated
+      startTransition(() => {
+        setProvider(null);
+      });
+    }
+    
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [acc, wallet?.address, authenticated, auth.walletAddress]);
+
+  const sections = [
+    <WelcomeSection
+      key="welcome"
+      wallet={wallet}
+      authenticated={authenticated}
+      openCampModal={openCampModal}
+      openModal={openModal}
+      disconnect={disconnect}
+      setSectionIndex={setSectionIndex}
+    />,
+    <FileUploadSection
+      key="file-upload"
+      setSectionIndex={setSectionIndex}
+      uploadedFile={uploadedFile}
+      setUploadedFile={setUploadedFile}
+    />,
+    <IPDetailsSection
+      key="ip-details"
+      uploadedFile={uploadedFile}
+      setSectionIndex={setSectionIndex}
+      setMintResult={setMintResult}
+    />,
+
+    <LoadingSection
+      key="loading-mint"
+      title="Minting in progress"
+      subtitle="Minting in progress. Do not move away from this page."
+    />,
+    <SuccessSection
+      key="success"
+      transactionHash={mintResult?.transactionHash}
+      tokenId={mintResult?.tokenId}
+      onBackToHome={() => {
+        setSectionIndex(0);
+        setUploadedFile(null);
+        setMintResult(null);
+      }}
+    />,
+  ];
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <>
+      <Navbar
+        galleryView={galleryView}
+        onGalleryToggle={(isGallery) => setGalleryView(isGallery)}
+      />
+      <Toaster theme="dark" />
+      <main className="flex flex-col w-full h-screen items-center justify-center text-white">
+        {galleryView ? (
+          <GalleryView onSwitchToRemix={() => setGalleryView(false)} />
+        ) : (
+          <AnimatePresence mode="sync">
+            {sections[sectionIndex]}
+          </AnimatePresence>
+        )}
+        <CampModal 
+          defaultProvider={
+            provider && 
+            wallet?.address && 
+            authenticated && 
+            auth.walletAddress &&
+            wallet.address.toLowerCase() === auth.walletAddress.toLowerCase()
+              ? provider 
+              : undefined
+          } 
+          injectButton={false} 
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+        <ParaModal
+          appName="Camp"
+          oAuthMethods={[OAuthMethod.GOOGLE, OAuthMethod.TWITTER]}
+          authLayout={["EXTERNAL:FULL", "AUTH:FULL"]}
+          externalWallets={[
+            "METAMASK",
+            "WALLETCONNECT",
+            "COINBASE",
+            "OKX",
+            "ZERION",
+          ]}
+          disablePhoneLogin
+          recoverySecretStepEnabled
+        />
       </main>
-    </div>
+    </>
   );
 }
